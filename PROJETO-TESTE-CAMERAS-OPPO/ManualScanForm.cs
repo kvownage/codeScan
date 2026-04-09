@@ -25,7 +25,7 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox     = false;
             MinimizeBox     = false;
-            StartPosition   = FormStartPosition.CenterParent;
+            StartPosition   = FormStartPosition.CenterScreen;
             Size            = new Size(420, 220);
             TopMost         = true;
 
