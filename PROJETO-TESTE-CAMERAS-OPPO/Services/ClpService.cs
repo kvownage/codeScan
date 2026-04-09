@@ -55,9 +55,20 @@ namespace PROJETO_TESTE_CAMERAS_OPPO.Services
 
         public void EscreverRegistro(int endereco, int valor)
         {
-            if (IsConnected)
+            try
             {
+                if (!IsConnected) TentarReconectar();
                 _CLP.WriteSingleRegister(endereco, valor);
+            }
+            catch
+            {
+                // Tenta reconectar e reescrever uma vez antes de desistir
+                try
+                {
+                    if (TentarReconectar())
+                        _CLP.WriteSingleRegister(endereco, valor);
+                }
+                catch { }
             }
         }
 

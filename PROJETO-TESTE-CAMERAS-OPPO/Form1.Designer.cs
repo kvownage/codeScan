@@ -177,7 +177,6 @@
             this.btnTesteImei.TabIndex = 51;
             this.btnTesteImei.Text = "Teste IMEI";
             this.btnTesteImei.UseVisualStyleBackColor = false;
-            this.btnTesteImei.Visible = false;
             this.btnTesteImei.Click += new System.EventHandler(this.btnTesteImei_Click);
             // 
             // lblOrderIdLabel
@@ -254,6 +253,7 @@
             this.Status_Leitura.HeaderText = "Status Leitura";
             this.Status_Leitura.MinimumWidth = 6;
             this.Status_Leitura.Name = "Status_Leitura";
+            this.Status_Leitura.Width = 125;
             // 
             // label9
             // 

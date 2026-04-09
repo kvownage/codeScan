@@ -93,6 +93,9 @@
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
+    <Compile Include="ManualScanForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="ToastForm.cs">
       <SubType>Form</SubType>
     </Compile>

@@ -382,29 +382,30 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
                         }
                     }
 
-                    // Verifica se todos os Mat_Id foram lidos
+                    // Após receber o batch (completo ou parcial), processa pendentes
                     int totalMatIds = dataGridDados.Rows.Cast<DataGridViewRow>()
                         .Count(r => !r.IsNewRow && r.Cells["Mat_Id"].Value != null);
 
-                    if (!_aguardandoReset && totalMatIds > 0 && codigosLidos.Count >= totalMatIds && !string.IsNullOrEmpty(Imei))
+                    if (!_aguardandoReset && totalMatIds > 0)
                     {
                         _aguardandoReset = true;
 
                         var linhasSemOk = dataGridDados.Rows.Cast<DataGridViewRow>()
                             .Where(r => !r.IsNewRow && r.Cells["Mat_Id"].Value != null &&
-                                        r.Cells["Status_Leitura"].Value?.ToString() != "OK")
+                                        r.Cells["Status_Leitura"].Value?.ToString()?.StartsWith("OK") != true)
                             .ToList();
 
-                        if (linhasSemOk.Count > 0)
-                        {
-                            foreach (var row in linhasSemOk)
-                                row.Cells["Status_Leitura"].Value = "FALHA";
+                        bool temPendentes = string.IsNullOrEmpty(Imei) || linhasSemOk.Count > 0;
 
-                            string matIdsFaltando = string.Join(", ", linhasSemOk.Select(r => r.Cells["Mat_Id"].Value?.ToString()));
-                            SinalizarErroTcp($"Falha: Mat_Id(s) sem leitura confirmada: {matIdsFaltando}");
+                        if (temPendentes)
+                        {
+                            SinalizarErroTcp("Leitura incompleta — escaneie os itens pendentes manualmente");
+                            // BeginInvoke garante execução em ciclo limpo do message loop
+                            this.BeginInvoke((Action)(() => ProcessarPendentesManual(linhasSemOk)));
                         }
                         else
                         {
+                            this.WindowState = FormWindowState.Minimized;
                             EnviarParaPaginaWeb();
                         }
                     }
@@ -607,6 +608,78 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
                 _toastFalha.Mostrar();
             }));
             _clpService.EscreverRegistro(20, 1);
+        }
+
+        private void LimparEstadoFalha()
+        {
+            if (_toastFalha != null && !_toastFalha.IsDisposed)
+                _toastFalha.FecharImediato();
+            PararPiscadaBtnReset();
+            lblErroTcp.Visible = false;
+            _clpService.EscreverRegistro(20, 0);
+        }
+
+        private void ProcessarPendentesManual(List<DataGridViewRow> linhasSemOk)
+        {
+            // IMEI pendente
+            if (string.IsNullOrEmpty(Imei))
+            {
+                Func<string, bool> validarImei = code =>
+                    string.IsNullOrEmpty(prefixImei) || code.StartsWith(prefixImei);
+
+                using (var dlg = new ManualScanForm("IMEI do produto", validarImei))
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                    {
+                        Imei = dlg.CodigoScaneado;
+                        MostrarToastImei(Imei);
+                    }
+                }
+            }
+
+            // Attachments pendentes
+            foreach (var row in linhasSemOk)
+            {
+                string matId     = row.Cells["Mat_Id"].Value?.ToString()?.Trim();
+                string descricao = row.Cells["Material_DESC"].Value?.ToString()?.Trim();
+
+                Func<string, bool> validar = code =>
+                {
+                    if (matId == "LAST-6")
+                    {
+                        string ultimos6 = Imei?.Length >= 6 ? Imei.Substring(Imei.Length - 6) : null;
+                        return !string.IsNullOrEmpty(ultimos6) && code.Contains(ultimos6);
+                    }
+                    return code.Contains(matId);
+                };
+
+                using (var dlg = new ManualScanForm(descricao, validar))
+                {
+                    if (dlg.ShowDialog(this) == DialogResult.OK)
+                    {
+                        codigosLidos.Add(dlg.CodigoScaneado);
+                        row.Cells["Status_Leitura"].Value = "OK (Manual)";
+                    }
+                    else
+                    {
+                        row.Cells["Status_Leitura"].Value = "FALHA";
+                    }
+                }
+            }
+
+            // Se tudo foi completado, limpa falha e envia
+            bool tudoCompleto = !string.IsNullOrEmpty(Imei) &&
+                dataGridDados.Rows.Cast<DataGridViewRow>()
+                    .Where(r => !r.IsNewRow && r.Cells["Mat_Id"].Value != null)
+                    .All(r => r.Cells["Status_Leitura"].Value?.ToString()?.StartsWith("OK") == true);
+
+            if (tudoCompleto)
+            {
+                LimparEstadoFalha();
+                this.WindowState = FormWindowState.Minimized;
+                EnviarParaPaginaWeb();
+            }
+            // senão: permanece em modo falha — Reset no toast limpa tudo
         }
 
         private void IniciarPiscadaBtnReset()
