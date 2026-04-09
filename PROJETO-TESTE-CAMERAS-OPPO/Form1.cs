@@ -525,7 +525,8 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             if (_toastRunning != null && !_toastRunning.IsDisposed)
                 _toastRunning.FecharImediato();
 
-            _toastRunning = new ToastForm("Sistema de Scan Ativo", ToastTipo.Running);
+            string versao = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+            _toastRunning = new ToastForm($"Sistema de Scan Ativo  ·  v{versao}", ToastTipo.Running);
             _toastRunning.Mostrar();
         }
 
