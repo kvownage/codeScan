@@ -1,11 +1,18 @@
 using System;
 using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace PROJETO_TESTE_CAMERAS_OPPO
 {
     public class ManualScanForm : Form
     {
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
+        [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hWnd);
+        [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+
         private Label   _lblInstrucao;
         private Label   _lblDescricao;
         private TextBox _txtCodigo;
@@ -108,17 +115,21 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
 
             Controls.AddRange(new Control[] { _lblInstrucao, _lblDescricao, _txtCodigo, _lblErro, _btnConfirmar, _btnPular });
 
-            Shown += (s, e) =>
-            {
-                BringToFront();
-                Activate();
-                BeginInvoke(new Action(() =>
-                {
-                    Activate();
-                    _txtCodigo.Focus();
-                    _txtCodigo.Select();
-                }));
-            };
+            Shown += (s, e) => ForcarFoco();
+        }
+
+        private void ForcarFoco()
+        {
+            IntPtr janelaAtual  = GetForegroundWindow();
+            uint   threadAtual  = GetCurrentThreadId();
+            uint   threadAlheia = GetWindowThreadProcessId(janelaAtual, IntPtr.Zero);
+
+            AttachThreadInput(threadAlheia, threadAtual, true);
+            SetForegroundWindow(Handle);
+            AttachThreadInput(threadAlheia, threadAtual, false);
+
+            _txtCodigo.Focus();
+            _txtCodigo.Select();
         }
 
         private void Confirmar()
