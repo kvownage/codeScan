@@ -14,6 +14,7 @@ namespace PROJETO_TESTE_CAMERAS_OPPO.Services
         public TcpListener _listener;
         public CancellationTokenSource _cts;
         public event Action OnError;
+        public event Action<string> OnData;
 
         public async Task IniciarTcpServer(int dataPort)
         {
@@ -60,8 +61,10 @@ namespace PROJETO_TESTE_CAMERAS_OPPO.Services
 
                             if (valor.Contains("ERROR"))
                                 OnError?.Invoke();
+                            else if (OnData != null)
+                                OnData.Invoke(valor);
                             else
-                                VarGlobal.LeiturasTCP.Add(valor);
+                                lock (VarGlobal.LeiturasTCP) VarGlobal.LeiturasTCP.Add(valor);
                         }                       
 
                         return;

@@ -54,7 +54,12 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             _sensorHikro1.OnError   += () => SinalizarErroTcp("Falha de leitura: Sensor Hikro 1");
             _sensorHikro2.OnError   += () => SinalizarErroTcp("Falha de leitura: Sensor Hikro 2");
             _leitorKeyence1.OnError += () => SinalizarErroTcp("Falha de leitura: Leitor Keyence 1");
-            _tcpServer5000.OnError  += () => SinalizarErroTcp("Falha de leitura: Servidor TCP 5000");
+
+            // _tcpServer5000: responsável exclusivo pelo IMEI
+            // OnData  = IMEI lido com sucesso → prossegue
+            // OnError = leitura falhou (ERROR) → abre manual para IMEI
+            _tcpServer5000.OnData  += codigo => this.BeginInvoke((Action)(() => AoReceberImei5000(codigo)));
+            _tcpServer5000.OnError += ()     => this.BeginInvoke((Action)(() => AoReceberImei5000(null)));
 
             CarregarConfiguracoes();
 
@@ -337,81 +342,6 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
 
                 ledCommCLP.BackColor = Color.Green;
 
-                if (VarGlobal.LeiturasTCP != null && VarGlobal.LeiturasTCP.Count > 0)
-                {
-                    lock (VarGlobal.LeiturasTCP)
-                    {
-                        foreach (var item in VarGlobal.LeiturasTCP)
-                        {
-                            // Valida se é IMEI (começa com o prefixo)
-                            if (!string.IsNullOrEmpty(prefixImei) && item.StartsWith(prefixImei))
-                            {
-                                Imei = item;
-                                MostrarToastImei(Imei);
-                            }
-
-                            // Valida se contém algum Mat_Id da tabela carregada pelo Selenium
-                            bool jaEmCodigosLidos = codigosLidos.Contains(item);
-                            if (!jaEmCodigosLidos)
-                            {
-                                foreach (DataGridViewRow row in dataGridDados.Rows)
-                                {
-                                    if (row.IsNewRow) continue;
-                                    string matId = row.Cells["Mat_Id"].Value?.ToString()?.Trim();
-                                    if (string.IsNullOrEmpty(matId)) continue;
-
-                                    bool bateu;
-                                    if (matId == "LAST-6")
-                                    {
-                                        string ultimos6 = Imei?.Length >= 6 ? Imei.Substring(Imei.Length - 6) : null;
-                                        bateu = !string.IsNullOrEmpty(ultimos6) && item.Contains(ultimos6);
-                                    }
-                                    else
-                                    {
-                                        bateu = item.Contains(matId);
-                                    }
-
-                                    if (bateu)
-                                    {
-                                        codigosLidos.Add(item);
-                                        row.Cells["Status_Leitura"].Value = "OK";
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Após receber o batch (completo ou parcial), processa pendentes
-                    int totalMatIds = dataGridDados.Rows.Cast<DataGridViewRow>()
-                        .Count(r => !r.IsNewRow && r.Cells["Mat_Id"].Value != null);
-
-                    if (!_aguardandoReset && totalMatIds > 0)
-                    {
-                        _aguardandoReset = true;
-
-                        var linhasSemOk = dataGridDados.Rows.Cast<DataGridViewRow>()
-                            .Where(r => !r.IsNewRow && r.Cells["Mat_Id"].Value != null &&
-                                        r.Cells["Status_Leitura"].Value?.ToString()?.StartsWith("OK") != true)
-                            .ToList();
-
-                        bool temPendentes = string.IsNullOrEmpty(Imei) || linhasSemOk.Count > 0;
-
-                        if (temPendentes)
-                        {
-                            SinalizarErroTcp("Leitura incompleta — escaneie os itens pendentes manualmente");
-                            // BeginInvoke garante execução em ciclo limpo do message loop
-                            this.BeginInvoke((Action)(() => ProcessarPendentesManual(linhasSemOk)));
-                        }
-                        else
-                        {
-                            this.WindowState = FormWindowState.Minimized;
-                            EnviarParaPaginaWeb();
-                        }
-                    }
-                }
-
-                
                 atualizaUI();
                 await Task.Delay(100);
             }
@@ -681,6 +611,82 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
                 EnviarParaPaginaWeb();
             }
             // senão: permanece em modo falha — Reset no toast limpa tudo
+        }
+
+        private void AoReceberImei5000(string codigo)
+        {
+            // Ignora se já está aguardando reset (ciclo anterior ainda não foi resetado)
+            if (_aguardandoReset) return;
+
+            // Se recebeu IMEI válido, armazena
+            if (!string.IsNullOrEmpty(codigo))
+            {
+                Imei = codigo;
+                MostrarToastImei(Imei);
+            }
+
+            // Processa leituras de attachments que chegaram dos outros readers
+            List<string> leituras;
+            lock (VarGlobal.LeiturasTCP)
+            {
+                leituras = new List<string>(VarGlobal.LeiturasTCP);
+                VarGlobal.LeiturasTCP.Clear();
+            }
+
+            foreach (var item in leituras)
+            {
+                if (codigosLidos.Contains(item)) continue;
+
+                foreach (DataGridViewRow row in dataGridDados.Rows)
+                {
+                    if (row.IsNewRow) continue;
+                    string matId = row.Cells["Mat_Id"].Value?.ToString()?.Trim();
+                    if (string.IsNullOrEmpty(matId)) continue;
+
+                    bool bateu;
+                    if (matId == "LAST-6")
+                    {
+                        string ultimos6 = Imei?.Length >= 6 ? Imei.Substring(Imei.Length - 6) : null;
+                        bateu = !string.IsNullOrEmpty(ultimos6) && item.Contains(ultimos6);
+                    }
+                    else
+                    {
+                        bateu = item.Contains(matId);
+                    }
+
+                    if (bateu)
+                    {
+                        codigosLidos.Add(item);
+                        row.Cells["Status_Leitura"].Value = "OK";
+                        break;
+                    }
+                }
+            }
+
+            int totalMatIds = dataGridDados.Rows.Cast<DataGridViewRow>()
+                .Count(r => !r.IsNewRow && r.Cells["Mat_Id"].Value != null);
+
+            if (totalMatIds == 0) return;
+
+            _aguardandoReset = true;
+
+            var linhasSemOk = dataGridDados.Rows.Cast<DataGridViewRow>()
+                .Where(r => !r.IsNewRow && r.Cells["Mat_Id"].Value != null &&
+                            r.Cells["Status_Leitura"].Value?.ToString()?.StartsWith("OK") != true)
+                .ToList();
+
+            bool temPendentes = string.IsNullOrEmpty(Imei) || linhasSemOk.Count > 0;
+
+            if (temPendentes)
+            {
+                SinalizarErroTcp("Leitura incompleta — escaneie os itens pendentes manualmente");
+                BeginInvoke((Action)(() => ProcessarPendentesManual(linhasSemOk)));
+            }
+            else
+            {
+                this.WindowState = FormWindowState.Minimized;
+                EnviarParaPaginaWeb();
+            }
         }
 
         private void IniciarPiscadaBtnReset()
