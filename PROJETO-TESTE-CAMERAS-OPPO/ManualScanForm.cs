@@ -110,8 +110,14 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
 
             Shown += (s, e) =>
             {
+                BringToFront();
                 Activate();
-                _txtCodigo.Focus();
+                BeginInvoke(new Action(() =>
+                {
+                    Activate();
+                    _txtCodigo.Focus();
+                    _txtCodigo.Select();
+                }));
             };
         }
 
