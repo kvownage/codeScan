@@ -48,6 +48,13 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
         private BatchPendente _bufferAtual = null;
         private bool _bufferBatch5000Done, _bufferBatch5001Done, _bufferBatch5002Done;
         private readonly object _bufferLock = new object();
+
+        // ── Contexto de log do ciclo atual ──
+        private string _logAnatelPayload  = "";
+        private string _logAnatelResposta = "";
+        private string _logAnatelMsg      = "";
+        private bool   _logAnatelOk       = false;
+
         private string _configLinha;
         private string _configEstacao;
         private string _configUsuario;
@@ -547,6 +554,62 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             File.AppendAllText(_caminhoLog, linha + Environment.NewLine, Encoding.UTF8);
         }
 
+        private void EscreverLogSucesso(string imei, string amesResultado)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("══════════════════════ SUCESSO ══════════════════════");
+            sb.AppendLine($"  Data/Hora : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine($"  Order     : {(string.IsNullOrEmpty(_currentOrderId) ? "-" : _currentOrderId)}");
+            sb.AppendLine($"  IMEI      : {imei}");
+            sb.AppendLine();
+            sb.AppendLine("  Anatel ─ Enviado:");
+            foreach (var l in _logAnatelPayload.Split('\n'))
+                sb.AppendLine($"    {l.TrimEnd()}");
+            sb.AppendLine($"  Anatel ─ Resposta: {_logAnatelResposta}");
+            sb.AppendLine();
+            sb.AppendLine($"  A-MES     : {amesResultado}");
+            sb.AppendLine("═════════════════════════════════════════════════════");
+            sb.AppendLine();
+            File.AppendAllText(_caminhoLog, sb.ToString(), Encoding.UTF8);
+        }
+
+        private void EscreverLogFalha(string motivo, List<string> faltando = null, string amesErro = null)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine("══════════════════════ FALHA ══════════════════════");
+            sb.AppendLine($"  Data/Hora : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine($"  Order     : {(string.IsNullOrEmpty(_currentOrderId) ? "-" : _currentOrderId)}");
+            sb.AppendLine($"  IMEI      : {(string.IsNullOrEmpty(Imei) ? "-" : Imei)}");
+            sb.AppendLine($"  Motivo    : {motivo}");
+
+            if (faltando != null && faltando.Count > 0)
+            {
+                sb.AppendLine();
+                sb.AppendLine("  Leituras faltando:");
+                foreach (var f in faltando)
+                    sb.AppendLine($"    - {f}");
+            }
+
+            if (!string.IsNullOrEmpty(_logAnatelPayload))
+            {
+                sb.AppendLine();
+                sb.AppendLine("  Anatel ─ Enviado:");
+                foreach (var l in _logAnatelPayload.Split('\n'))
+                    sb.AppendLine($"    {l.TrimEnd()}");
+                sb.AppendLine($"  Anatel ─ Resposta: {(_logAnatelOk ? "OK" : "ERRO")} | {_logAnatelMsg}");
+            }
+
+            if (!string.IsNullOrEmpty(amesErro))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"  A-MES ─ Falha: {amesErro}");
+            }
+
+            sb.AppendLine("════════════════════════════════════════════════════");
+            sb.AppendLine();
+            File.AppendAllText(_caminhoLog, sb.ToString(), Encoding.UTF8);
+        }
+
         private void AoMudarOrderIdBackground(string novoValor)
         {
             _currentOrderId = string.IsNullOrWhiteSpace(novoValor) ? "" : novoValor;
@@ -584,9 +647,10 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             }
         }
 
-        private void SinalizarErroTcp(string mensagem)
+        private void SinalizarErroTcp(string mensagem, bool escreverLog = true)
         {
-            EscreverLog("FALHA", $"IMEI: {(string.IsNullOrEmpty(Imei) ? "-" : Imei)} | {mensagem}");
+            if (escreverLog)
+                EscreverLog("FALHA", $"IMEI: {(string.IsNullOrEmpty(Imei) ? "-" : Imei)} | {mensagem}");
             this.Invoke((Action)(() =>
             {
                 lblErroTcp.BackColor = Color.Red;
@@ -715,13 +779,16 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
                 var faltando = new System.Collections.Generic.List<string>();
                 if (string.IsNullOrEmpty(adpAnatel)) faltando.Add("Anatel Adaptador (9004)");
                 if (string.IsNullOrEmpty(batAnatel)) faltando.Add("Anatel Bateria (9003)");
-                SinalizarErroTcp($"Códigos Anatel não recebidos: {string.Join(", ", faltando)}");
+                SinalizarErroTcp($"Códigos Anatel não recebidos: {string.Join(", ", faltando)}", escreverLog: false);
+                EscreverLogFalha("Códigos Anatel não recebidos", faltando: faltando);
                 return;
             }
 
             if (string.IsNullOrEmpty(Imei))
             {
-                SinalizarErroTcp("IMEI não encontrado na leitura");
+                SinalizarErroTcp("IMEI não encontrado na leitura", escreverLog: false);
+                EscreverLogFalha("IMEI não encontrado na leitura",
+                    faltando: new System.Collections.Generic.List<string> { "IMEI (leitores 5000/5001/5002)" });
                 return;
             }
 
@@ -774,7 +841,9 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
                     batAnatel  = batAnatelVal,
                     adptSn     = adptSN
                 };
-                string jsonBody = JsonSerializer.Serialize(payload);
+                string jsonBody = JsonSerializer.Serialize(payload,
+                    new JsonSerializerOptions { WriteIndented = true });
+                _logAnatelPayload = jsonBody;
 
                 using (var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) })
                 {
@@ -800,11 +869,14 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
                     }
                     catch { }
 
-                    EscreverLog("ANATEL API", $"IMEI:{imei} | adptAnatel:{adpAnatelVal} | batAnatel:{batAnatelVal} | adptSN:{adptSN} | {(sucesso ? "OK" : "ERRO")} | {msg}");
+                    _logAnatelResposta = body;
+                    _logAnatelMsg      = msg;
+                    _logAnatelOk       = sucesso;
 
                     if (!sucesso)
                     {
-                        SinalizarErroTcp($"Anatel API: {msg}");
+                        SinalizarErroTcp($"Anatel API: {msg}", escreverLog: false);
+                        EscreverLogFalha("Anatel API retornou erro");
                         return false;
                     }
                     return true;
@@ -1165,7 +1237,9 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             if (!AguardarStatusContem("Ready"))
             {
                 string msgStatus = driver.FindElement(By.Id("opcStatus-body")).Text.Trim();
-                SinalizarErroTcp($"IMEI rejeitado: {(string.IsNullOrEmpty(msgStatus) ? "sem resposta da plataforma" : msgStatus)}");
+                string motivo = string.IsNullOrEmpty(msgStatus) ? "sem resposta da plataforma" : msgStatus;
+                SinalizarErroTcp($"IMEI rejeitado: {motivo}", escreverLog: false);
+                EscreverLogFalha("Apontamento A-MES", amesErro: $"IMEI rejeitado: {motivo}");
                 return; // não envia os demais códigos
             }
 
@@ -1187,7 +1261,14 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             }
 
             // ── 4. Sem Success: entra em falha e aguarda bipagem manual na página web ──
-            SinalizarErroTcp("Falha: Leia manualmente os códigos que faltaram");
+            // Levanta lista de itens ainda sem barcode na grade para reportar no log
+            var itensFaltando = ObterLinhasComBarcodeIdVazio()
+                .Select(x => string.IsNullOrEmpty(x.matId) ? x.desc : $"{x.desc} (MatID: {x.matId})")
+                .ToList();
+            SinalizarErroTcp("Falha: Leia manualmente os códigos que faltaram", escreverLog: false);
+            EscreverLogFalha("Apontamento A-MES — códigos incompletos",
+                faltando: itensFaltando.Count > 0 ? itensFaltando : null,
+                amesErro: "Leia manualmente os códigos que faltaram na grade");
 
             // Foca e clica no campo de leitura da página web para o operador bipar direto
             try
@@ -1272,7 +1353,13 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
             if (VarGlobal.LeiturasTCP != null)
                 lock (VarGlobal.LeiturasTCP) { VarGlobal.LeiturasTCP.Clear(); }
 
-            EscreverLog("SUCESSO", $"IMEI: {imeiApontado}");
+            EscreverLogSucesso(imeiApontado, "Apontado com Sucesso — opcStatus: Success");
+
+            // Limpa contexto de log do ciclo
+            _logAnatelPayload  = "";
+            _logAnatelResposta = "";
+            _logAnatelMsg      = "";
+            _logAnatelOk       = false;
 
             LimparEstadoFalha();
             MostrarToastRunning();
