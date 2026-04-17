@@ -1260,7 +1260,16 @@ namespace PROJETO_TESTE_CAMERAS_OPPO
                 return;
             }
 
-            // ── 4. Sem Success: entra em falha e aguarda bipagem manual na página web ──
+            // ── 4. Sem Success: verifica se é SN já apontado (AWIP-1131) ──────────────
+            string msgFinal = driver.FindElement(By.Id("opcStatus-body")).Text.Trim();
+            if (msgFinal.Contains("AWIP-1131"))
+            {
+                SinalizarErroTcp($"SN já apontado: {msgFinal}", escreverLog: false);
+                EscreverLogFalha("Apontamento A-MES", amesErro: $"SN já apontado — {msgFinal}");
+                return;
+            }
+
+            // ── 5. Sem Success: entra em falha e aguarda bipagem manual na página web ──
             // Levanta lista de itens ainda sem barcode na grade para reportar no log
             var itensFaltando = ObterLinhasComBarcodeIdVazio()
                 .Select(x => string.IsNullOrEmpty(x.matId) ? x.desc : $"{x.desc} (MatID: {x.matId})")
